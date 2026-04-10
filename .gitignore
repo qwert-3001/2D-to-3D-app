@@ -10,3 +10,8 @@ wheels/
 .venv
 
 images/
+
+.obj
+.mtl
+
+.cache/

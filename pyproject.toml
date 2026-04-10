@@ -1,3 +1,21 @@
+
+[tool.uv]
+no-build-isolation-package = ["torchmcubes"]
+
+# uv при установке рекомендует прописать
+[tool.uv.extra-build-dependencies]
+torchmcubes = ["scikit_build_core"]
+
+# Для работы только на cpu
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+# Для работы только на cpu туда же
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
 [project]
 name = "fast-api-2d-to-3d-project"
 version = "0.1.0"
@@ -9,4 +27,19 @@ dependencies = [
     "asyncpg>=0.31.0",
     "fastapi[standard]>=0.135.1",
     "sqlalchemy>=2.0.48",
+    #Далее зависимости для TripoSR
+    "omegaconf==2.3.0",
+    "Pillow==10.1.0",
+    "einops==0.7.0",
+    "torch", #Сначала ставим торч, после торчкуб
+    "torchmcubes @ git+https://github.com/tatsy/torchmcubes.git", # СОбирается из торча (Ставим на первое место)
+    "transformers==4.35.0",
+    "trimesh==4.0.5",
+    "rembg",
+    "huggingface-hub",
+    "imageio[ffmpeg]",
+    "xatlas==0.0.9",
+    "moderngl==5.10.0",
+    "onnxruntime>=1.24.4",
+    "tqdm>=4.67.3",
 ]
