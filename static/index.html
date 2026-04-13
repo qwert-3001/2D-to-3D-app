@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>2D to 3D Converter</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body { background: #0d1117; color: #e6edf3; }
+        h5 { color: #e6edf3; }
+        .column-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; height: 100%; }
+        .image-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 400px; overflow-y: auto; }
+        .image-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: pointer; border: 3px solid transparent; }
+        .image-thumb.selected { border-color: #388bfd; }
+        .image-thumb:hover { border-color: #30363d; }
+        #download-btn { display: none; }
+        .btn-primary { background: #238636; border-color: #238636; }
+        .btn-primary:hover { background: #2ea043; border-color: #2ea043; }
+        .btn-outline-primary { color: #388bfd; border-color: #388bfd; }
+        .btn-outline-primary:hover { background: #388bfd; color: #fff; }
+        .btn-success { background: #238636; border-color: #238636; }
+        .btn-success:hover { background: #2ea043; border-color: #2ea043; }
+        .form-range::-webkit-slider-thumb { background: #388bfd; }
+        .form-check-input:checked { background-color: #388bfd; border-color: #388bfd; }
+        .form-check-input { background-color: #21262d; border-color: #30363d; }
+        .alert-secondary { background: #161b22; border-color: #30363d; color: #8b949e; }
+        .alert-info { background: #161b22; border-color: #388bfd; color: #388bfd; }
+        .alert-warning { background: #161b22; border-color: #d29922; color: #d29922; }
+        .alert-success { background: #161b22; border-color: #238636; color: #3fb950; }
+        .alert-danger { background: #161b22; border-color: #da3633; color: #f85149; }
+        .text-muted { color: #8b949e !important; }
+        .small { color: #8b949e; }
+    </style>
+</head>
+<body>
+<div class="container py-4" style="max-width: 1100px;">
+
+    <!-- Статус -->
+    <div class="alert alert-secondary text-center mb-4" id="status">
+        Выберете изображение и нажмите "Создать 3D модель"
+    </div>
+
+    <!-- Три колонки -->
+    <div class="row g-4">
+
+        <!-- Колонка 1: Изображения -->
+        <div class="col-md-4">
+            <div class="column-card">
+                <h5 class="mb-3">Изображения</h5>
+                <div class="image-grid mb-3" id="image-grid">
+                    <!-- миниатюры загружаются через JS -->
+                </div>
+                <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" class="d-none">
+                <button class="btn btn-outline-primary w-100" onclick="document.getElementById('file-input').click()">
+                    Загрузить изображение
+                </button>
+            </div>
+        </div>
+
+        <!-- Колонка 2: Настройки и генерация -->
+        <div class="col-md-4">
+            <div class="column-card">
+                <h5 class="mb-3">Настройки</h5>
+
+                <div class="mb-3">
+                    <label class="form-label">Resolution: <strong id="resolution-value">128</strong></label>
+                    <input type="range" class="form-range" id="resolution"
+                        min="0" max="3" step="1" value="0"
+                        oninput="updateResolution(this.value)">
+                    <div class="d-flex justify-content-between small text-muted">
+                        <span>128</span><span>256</span><span>512</span><span>1024</span>
+                    </div>
+                </div>
+
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" id="vertex-color">
+                    <label class="form-check-label" for="vertex-color">Has vertex color</label>
+                </div>
+
+                <!-- Предупреждение о высоком resolution -->
+                <div class="alert alert-warning py-2 mb-3 d-none" id="risk-warning">
+                    ⚠️ Resolution 256 и выше может вызвать зависание компьютера из-за нехватки памяти.
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="risk-accept" onchange="toggleGenerateBtn()">
+                        <label class="form-check-label" for="risk-accept">Я понимаю риски</label>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary w-100" id="generate-btn" onclick="generate()">
+                    Создать 3D модель
+                </button>
+
+                <!-- Спиннер -->
+                <div class="text-center mt-3 d-none" id="spinner">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Генерация модели...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Колонка 3: Результат -->
+        <div class="col-md-4">
+            <div class="column-card d-flex flex-column align-items-center justify-content-center" style="min-height: 200px;">
+                <h5 class="mb-3">Результат</h5>
+                <p class="text-muted" id="result-text">Модель ещё не создана</p>
+                <a class="btn btn-success w-100" id="download-btn">
+                    Скачать модель
+                </a>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    const RESOLUTIONS = [128, 256, 512, 1024];
+    let selectedImageId = null;
+
+    // Загрузка списка изображений при старте
+    async function loadImages() {
+        const response = await fetch('/images/');
+        const images = await response.json();
+        const grid = document.getElementById('image-grid');
+        grid.innerHTML = '';
+        images.forEach(filename => {
+            const img = document.createElement('img');
+            img.src = `/images/${filename}`;
+            img.className = 'image-thumb';
+            img.title = filename;
+            img.onclick = () => selectImage(filename, img);
+            grid.appendChild(img);
+        });
+    }
+
+    // Выбор изображения
+    function selectImage(imageId, imgEl) {
+        selectedImageId = imageId;
+        document.querySelectorAll('.image-thumb').forEach(i => i.classList.remove('selected'));
+        imgEl.classList.add('selected');
+        setStatus('Изображение выбрано: ' + imageId, 'info');
+    }
+
+    // Загрузка нового изображения
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setStatus('Загрузка изображения...', 'warning');
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/upload-image/', { method: 'POST', body: formData });
+        const data = await response.json();
+        selectedImageId = data.image_id;
+
+        await loadImages();
+        setStatus('Изображение загружено', 'success');
+    });
+
+    // Генерация 3D
+    async function generate() {
+        if (!selectedImageId) {
+            alert('Выберите изображение');
+            return;
+        }
+
+        const resolution = RESOLUTIONS[document.getElementById('resolution').value];
+        const vertexColor = document.getElementById('vertex-color').checked;
+
+        setStatus('Генерация модели...', 'warning');
+        document.getElementById('spinner').classList.remove('d-none');
+        document.getElementById('generate-btn').disabled = true;
+        document.getElementById('download-btn').style.display = 'none';
+        document.getElementById('result-text').textContent = 'Идёт генерация...';
+
+        const params = new URLSearchParams({ image_id: selectedImageId, resolution, vertex_color: vertexColor });
+        const response = await fetch(`/generate-3d/?${params}`, { method: 'POST' });
+
+        document.getElementById('spinner').classList.add('d-none');
+        document.getElementById('generate-btn').disabled = false;
+
+        if (response.ok) {
+            const blob = await response.blob();
+            const downloadUrl = URL.createObjectURL(blob);
+            const filename = selectedImageId.replace(/\.[^.]+$/, '') + '.obj';
+
+            const btn = document.getElementById('download-btn');
+            btn.href = downloadUrl;
+            btn.download = filename;
+            btn.style.display = 'block';
+
+            document.getElementById('result-text').textContent = 'Модель готова!';
+            setStatus('Готово', 'success');
+        } else {
+            document.getElementById('result-text').textContent = 'Ошибка генерации';
+            setStatus('Ошибка', 'danger');
+        }
+    }
+
+    // Обновление значения resolution
+    function updateResolution(val) {
+        document.getElementById('resolution-value').textContent = RESOLUTIONS[val];
+        const isRisky = RESOLUTIONS[val] >= 256;
+        document.getElementById('risk-warning').classList.toggle('d-none', !isRisky);
+        document.getElementById('risk-accept').checked = false;
+        toggleGenerateBtn();
+    }
+
+    // Блокировка кнопки если не принят риск
+    function toggleGenerateBtn() {
+        const val = document.getElementById('resolution').value;
+        const isRisky = RESOLUTIONS[val] >= 256;
+        const accepted = document.getElementById('risk-accept').checked;
+        document.getElementById('generate-btn').disabled = isRisky && !accepted;
+    }
+
+    // Обновление статуса
+    function setStatus(text, type) {
+        const el = document.getElementById('status');
+        el.textContent = text;
+        el.className = `alert alert-${type} text-center mb-4`;
+    }
+
+    loadImages();
+</script>
+</body>
+</html>
