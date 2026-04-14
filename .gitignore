@@ -11,8 +11,8 @@ wheels/
 
 images/
 
-.obj
-.mtl
+*.obj
+*.mtl
 
 .cache/
 
