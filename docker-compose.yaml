@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .          
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./images:/project/images
+      - ./output:/project/output
+      - hf_cache:/root/.cache/huggingface # ЧТобы один раз модель скачалась и при down не удалялась
+
+volumes:
+  hf_cache:

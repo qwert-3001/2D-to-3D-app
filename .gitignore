@@ -15,3 +15,5 @@ images/
 .mtl
 
 .cache/
+
+output/
