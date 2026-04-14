@@ -29,6 +29,11 @@
         .alert-danger { background: #161b22; border-color: #da3633; color: #f85149; }
         .text-muted { color: #8b949e !important; }
         .small { color: #8b949e; }
+
+        #viewer-container { position: relative; width: 100%; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #0d1117; }
+        #three-canvas { width: 100%; height: 100%; display: block; }
+        #viewer-placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #8b949e; pointer-events: none; }
+        #viewer-hint { position: absolute; bottom: 8px; width: 100%; text-align: center; font-size: 12px; color: #8b949e; pointer-events: none; display: none; }
     </style>
 </head>
 <body>
@@ -99,10 +104,16 @@
 
         <!-- Колонка 3: Результат -->
         <div class="col-md-4">
-            <div class="column-card d-flex flex-column align-items-center justify-content-center" style="min-height: 200px;">
+            <div class="column-card">
                 <h5 class="mb-3">Результат</h5>
-                <p class="text-muted" id="result-text">Модель ещё не создана</p>
-                <a class="btn btn-success w-100" id="download-btn">
+
+                <div id="viewer-container">
+                    <canvas id="three-canvas"></canvas>
+                    <div id="viewer-placeholder">Модель ещё не создана</div>
+                    <div id="viewer-hint">перетащи для вращения · скролл для зума</div>
+                </div>
+
+                <a class="btn btn-success w-100 mt-3" id="download-btn">
                     Скачать модель
                 </a>
             </div>
@@ -111,11 +122,96 @@
     </div>
 </div>
 
-<script>
+<!-- Three.js через ES modules -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ─── Three.js ────────────────────────────────────────────────────────────
+
+    const canvas = document.getElementById('three-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+    camera.position.set(0, 0, 3);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(2, 4, 3);
+    scene.add(dirLight);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.5;
+
+    // Подгоняем canvas под контейнер при любом изменении размера
+    function resizeRenderer() {
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    }
+    new ResizeObserver(resizeRenderer).observe(canvas);
+    resizeRenderer();
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // Загружаем .obj blob в сцену
+    function loadModel(url) {
+        scene.children
+            .filter(c => c.userData.isModel)
+            .forEach(c => scene.remove(c));
+
+        new OBJLoader().load(url, (obj) => {
+            obj.userData.isModel = true;
+
+            obj.traverse(child => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshPhongMaterial({ color: 0x999999, shininess: 40 });
+                }
+            });
+
+            // Центрируем модель и отодвигаем камеру
+            const box = new THREE.Box3().setFromObject(obj);
+            const center = box.getCenter(new THREE.Vector3());
+            const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
+
+            obj.position.sub(center);
+            camera.position.set(0, 0, maxDim * 2.2);
+            controls.target.set(0, 0, 0);
+            controls.update();
+
+            scene.add(obj);
+
+            document.getElementById('viewer-placeholder').style.display = 'none';
+            document.getElementById('viewer-hint').style.display = 'block';
+        });
+    }
+
+    // ─── Основной JS ─────────────────────────────────────────────────────────
+
     const RESOLUTIONS = [128, 256, 512, 1024];
     let selectedImageId = null;
 
-    // Загрузка списка изображений при старте
     async function loadImages() {
         const response = await fetch('/images/');
         const images = await response.json();
@@ -131,7 +227,6 @@
         });
     }
 
-    // Выбор изображения
     function selectImage(imageId, imgEl) {
         selectedImageId = imageId;
         document.querySelectorAll('.image-thumb').forEach(i => i.classList.remove('selected'));
@@ -139,7 +234,6 @@
         setStatus('Изображение выбрано: ' + imageId, 'info');
     }
 
-    // Загрузка нового изображения
     document.getElementById('file-input').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -156,12 +250,9 @@
         setStatus('Изображение загружено', 'success');
     });
 
-    // Генерация 3D
-    async function generate() {
-        if (!selectedImageId) {
-            alert('Выберите изображение');
-            return;
-        }
+    // onclick из HTML не видит функции внутри module — вешаем на window
+    window.generate = async function() {
+        if (!selectedImageId) { alert('Выберите изображение'); return; }
 
         const resolution = RESOLUTIONS[document.getElementById('resolution').value];
         const vertexColor = document.getElementById('vertex-color').checked;
@@ -170,7 +261,6 @@
         document.getElementById('spinner').classList.remove('d-none');
         document.getElementById('generate-btn').disabled = true;
         document.getElementById('download-btn').style.display = 'none';
-        document.getElementById('result-text').textContent = 'Идёт генерация...';
 
         const params = new URLSearchParams({ image_id: selectedImageId, resolution, vertex_color: vertexColor });
         const response = await fetch(`/generate-3d/?${params}`, { method: 'POST' });
@@ -183,37 +273,34 @@
             const downloadUrl = URL.createObjectURL(blob);
             const filename = selectedImageId.replace(/\.[^.]+$/, '') + '.obj';
 
+            loadModel(downloadUrl);
+
             const btn = document.getElementById('download-btn');
             btn.href = downloadUrl;
             btn.download = filename;
             btn.style.display = 'block';
 
-            document.getElementById('result-text').textContent = 'Модель готова!';
             setStatus('Готово', 'success');
         } else {
-            document.getElementById('result-text').textContent = 'Ошибка генерации';
             setStatus('Ошибка', 'danger');
         }
-    }
+    };
 
-    // Обновление значения resolution
-    function updateResolution(val) {
+    window.updateResolution = function(val) {
         document.getElementById('resolution-value').textContent = RESOLUTIONS[val];
         const isRisky = RESOLUTIONS[val] >= 256;
         document.getElementById('risk-warning').classList.toggle('d-none', !isRisky);
         document.getElementById('risk-accept').checked = false;
         toggleGenerateBtn();
-    }
+    };
 
-    // Блокировка кнопки если не принят риск
-    function toggleGenerateBtn() {
+    window.toggleGenerateBtn = function() {
         const val = document.getElementById('resolution').value;
         const isRisky = RESOLUTIONS[val] >= 256;
         const accepted = document.getElementById('risk-accept').checked;
         document.getElementById('generate-btn').disabled = isRisky && !accepted;
-    }
+    };
 
-    // Обновление статуса
     function setStatus(text, type) {
         const el = document.getElementById('status');
         el.textContent = text;
